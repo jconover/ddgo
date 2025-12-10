@@ -1,0 +1,167 @@
+# DDGo Local Development Environment
+# Provides full stack for local development and testing
+
+version: '3.8'
+
+services:
+  # ==========================================================================
+  # Application Service
+  # ==========================================================================
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: production
+    container_name: ddgo-api
+    ports:
+      - "5000:5000"
+    environment:
+      - ENVIRONMENT=development
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=ddgo
+      - DB_USER=ddgo
+      - DB_PASSWORD=ddgo_dev_password
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - APP_VERSION=1.0.0-dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - ddgo-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ==========================================================================
+  # Database Service
+  # ==========================================================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: ddgo-postgres
+    environment:
+      POSTGRES_DB: ddgo
+      POSTGRES_USER: ddgo
+      POSTGRES_PASSWORD: ddgo_dev_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - ddgo-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ddgo -d ddgo"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ==========================================================================
+  # Cache Service
+  # ==========================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: ddgo-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - ddgo-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    command: redis-server --appendonly yes
+
+  # ==========================================================================
+  # Reverse Proxy (Nginx)
+  # ==========================================================================
+  nginx:
+    image: nginx:alpine
+    container_name: ddgo-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - api
+    networks:
+      - ddgo-network
+    restart: unless-stopped
+
+  # ==========================================================================
+  # Monitoring - Prometheus
+  # ==========================================================================
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: ddgo-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ../monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../monitoring/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-lifecycle'
+    networks:
+      - ddgo-network
+    restart: unless-stopped
+
+  # ==========================================================================
+  # Monitoring - Grafana
+  # ==========================================================================
+  grafana:
+    image: grafana/grafana:latest
+    container_name: ddgo-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ../monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+    networks:
+      - ddgo-network
+    restart: unless-stopped
+
+  # ==========================================================================
+  # Alertmanager
+  # ==========================================================================
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: ddgo-alertmanager
+    ports:
+      - "9093:9093"
+    volumes:
+      - ../monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    networks:
+      - ddgo-network
+    restart: unless-stopped
+
+networks:
+  ddgo-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  prometheus_data:
+  grafana_data:
