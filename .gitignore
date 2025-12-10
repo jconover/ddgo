@@ -1,0 +1,100 @@
+# DDGo Project .gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.venv/
+ENV/
+.eggs/
+*.egg-info/
+*.egg
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.mypy_cache/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Terraform
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+.terraform/
+.terraform.lock.hcl
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+tfplan
+
+# Ansible
+*.retry
+ansible/inventories/*/group_vars/vault.yml
+
+# Docker
+docker/nginx/ssl/*.pem
+docker/nginx/ssl/*.key
+
+# Logs
+logs/
+*.log
+
+# Environment files
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Secrets
+secrets/
+*.pem
+*.key
+credentials.json
+
+# Build artifacts
+dist/
+build/
+*.whl
+
+# Data directories
+data/
+tmp/
+
+# Node (if any frontend added)
+node_modules/
+
+# Coverage reports
+coverage/
+*.lcov
+
+# Test artifacts
+.hypothesis/
+junit.xml
+test-results/
+
+# Documentation build
+docs/_build/
+site/
+
+# Local development
+.local/
