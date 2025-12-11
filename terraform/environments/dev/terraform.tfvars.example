@@ -1,0 +1,10 @@
+# Development Environment Variable Values
+# Customize these values for your environment
+
+project_name = "ddgo"
+environment  = "dev"
+aws_region   = "us-east-1"
+vpc_cidr     = "10.0.0.0/16"
+
+# Container image - update after building and pushing to ECR
+container_image = "nginx:alpine"
