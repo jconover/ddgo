@@ -1,0 +1,146 @@
+# Common role - Base configuration for all servers
+
+---
+- name: Include OS-specific variables
+  ansible.builtin.include_vars: "{{ ansible_os_family | lower }}.yml"
+  tags: [always]
+
+- name: Set timezone
+  community.general.timezone:
+    name: "{{ timezone }}"
+  tags: [common, timezone]
+
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+  when: ansible_os_family == 'Debian'
+  tags: [common, packages]
+
+- name: Upgrade all packages
+  ansible.builtin.apt:
+    upgrade: dist
+    autoremove: true
+  when: package_upgrade | default(false)
+  tags: [common, packages]
+
+- name: Install common packages
+  ansible.builtin.apt:
+    name: "{{ common_packages }}"
+    state: present
+  tags: [common, packages]
+
+- name: Create application user
+  ansible.builtin.user:
+    name: "{{ app_user }}"
+    group: "{{ app_group }}"
+    shell: /bin/bash
+    home: "{{ app_home }}"
+    create_home: true
+    state: present
+  tags: [common, users]
+
+- name: Create application group
+  ansible.builtin.group:
+    name: "{{ app_group }}"
+    state: present
+  tags: [common, users]
+
+- name: Create application directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ app_user }}"
+    group: "{{ app_group }}"
+    mode: '0755'
+  loop:
+    - "{{ app_home }}"
+    - "{{ app_log_dir }}"
+    - "{{ app_home }}/config"
+    - "{{ app_home }}/data"
+  tags: [common, directories]
+
+- name: Configure SSH hardening
+  ansible.builtin.template:
+    src: sshd_config.j2
+    dest: /etc/ssh/sshd_config
+    owner: root
+    group: root
+    mode: '0644'
+    validate: '/usr/sbin/sshd -t -f %s'
+  notify: Restart SSH
+  tags: [common, security, ssh]
+
+- name: Configure UFW defaults
+  community.general.ufw:
+    direction: "{{ item.direction }}"
+    policy: "{{ item.policy }}"
+  loop:
+    - { direction: incoming, policy: "{{ firewall_default_incoming }}" }
+    - { direction: outgoing, policy: "{{ firewall_default_outgoing }}" }
+  when: firewall_enabled
+  tags: [common, security, firewall]
+
+- name: Configure UFW rules
+  community.general.ufw:
+    rule: "{{ item.rule }}"
+    port: "{{ item.port }}"
+    proto: "{{ item.proto }}"
+  loop: "{{ firewall_rules }}"
+  when: firewall_enabled
+  tags: [common, security, firewall]
+
+- name: Enable UFW
+  community.general.ufw:
+    state: enabled
+  when: firewall_enabled
+  tags: [common, security, firewall]
+
+- name: Configure sysctl for performance
+  ansible.posix.sysctl:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    state: present
+    reload: true
+  loop:
+    - { name: 'net.core.somaxconn', value: '65535' }
+    - { name: 'net.ipv4.tcp_max_syn_backlog', value: '65535' }
+    - { name: 'net.ipv4.ip_local_port_range', value: '1024 65535' }
+    - { name: 'net.ipv4.tcp_tw_reuse', value: '1' }
+    - { name: 'vm.swappiness', value: '10' }
+    - { name: 'fs.file-max', value: '2097152' }
+  tags: [common, sysctl]
+
+- name: Configure logrotate for application logs
+  ansible.builtin.template:
+    src: logrotate.j2
+    dest: /etc/logrotate.d/ddgo
+    owner: root
+    group: root
+    mode: '0644'
+  tags: [common, logging]
+
+- name: Install and configure NTP
+  ansible.builtin.apt:
+    name: chrony
+    state: present
+  tags: [common, ntp]
+
+- name: Configure NTP servers
+  ansible.builtin.template:
+    src: chrony.conf.j2
+    dest: /etc/chrony/chrony.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart Chrony
+  when: ntp_enabled
+  tags: [common, ntp]
+
+- name: Ensure Chrony is running
+  ansible.builtin.systemd:
+    name: chrony
+    state: started
+    enabled: true
+  when: ntp_enabled
+  tags: [common, ntp]

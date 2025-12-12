@@ -1,0 +1,57 @@
+# SSH Server Configuration - Managed by Ansible
+# Security-hardened configuration
+
+Port {{ ssh_port }}
+Protocol 2
+HostKey /etc/ssh/ssh_host_rsa_key
+HostKey /etc/ssh/ssh_host_ecdsa_key
+HostKey /etc/ssh/ssh_host_ed25519_key
+
+# Logging
+SyslogFacility AUTH
+LogLevel VERBOSE
+
+# Authentication
+LoginGraceTime 30
+PermitRootLogin {{ ssh_permit_root_login }}
+StrictModes yes
+MaxAuthTries 3
+MaxSessions 10
+
+PubkeyAuthentication yes
+AuthorizedKeysFile .ssh/authorized_keys
+
+{% if not ssh_allow_password %}
+PasswordAuthentication no
+PermitEmptyPasswords no
+ChallengeResponseAuthentication no
+{% else %}
+PasswordAuthentication yes
+PermitEmptyPasswords no
+{% endif %}
+
+# Kerberos options
+KerberosAuthentication no
+GSSAPIAuthentication no
+
+# Other options
+UsePAM yes
+X11Forwarding no
+PrintMotd no
+PrintLastLog yes
+TCPKeepAlive yes
+ClientAliveInterval 300
+ClientAliveCountMax 2
+UseDNS no
+
+# Allow only specific users/groups (uncomment and customize)
+# AllowUsers {{ ansible_user }}
+# AllowGroups sudo
+
+# SFTP
+Subsystem sftp /usr/lib/openssh/sftp-server
+
+# Security hardening
+Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com
+MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com
+KexAlgorithms curve25519-sha256@libssh.org,diffie-hellman-group-exchange-sha256
