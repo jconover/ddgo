@@ -1,0 +1,74 @@
+# Global variables for all hosts in dev environment
+
+---
+# Project settings
+project_name: ddgo
+environment: dev
+domain_name: dev.ddgo.local
+
+# System settings
+timezone: UTC
+locale: en_US.UTF-8
+
+# SSH settings
+ssh_port: 22
+ssh_allow_password: false
+ssh_permit_root_login: "no"
+
+# Package management
+package_update: true
+package_upgrade: true
+common_packages:
+  - curl
+  - wget
+  - vim
+  - htop
+  - iotop
+  - net-tools
+  - dnsutils
+  - jq
+  - unzip
+  - git
+  - python3-pip
+  - ca-certificates
+  - gnupg
+  - lsb-release
+
+# Docker settings
+docker_edition: ce
+docker_version: "24.0"
+docker_compose_version: "2.21.0"
+docker_users:
+  - "{{ ansible_user }}"
+  - ddgo
+
+# Firewall settings (UFW)
+firewall_enabled: true
+firewall_default_incoming: deny
+firewall_default_outgoing: allow
+firewall_rules:
+  - { rule: allow, port: 22, proto: tcp }
+  - { rule: allow, port: 80, proto: tcp }
+  - { rule: allow, port: 443, proto: tcp }
+
+# Logging settings
+log_retention_days: 30
+log_compress: true
+
+# NTP settings
+ntp_enabled: true
+ntp_servers:
+  - 0.pool.ntp.org
+  - 1.pool.ntp.org
+  - 2.pool.ntp.org
+
+# Monitoring agent settings
+node_exporter_version: "1.7.0"
+node_exporter_port: 9100
+
+# Application settings
+app_name: ddgo-api
+app_user: ddgo
+app_group: ddgo
+app_home: /opt/ddgo
+app_log_dir: /var/log/ddgo
