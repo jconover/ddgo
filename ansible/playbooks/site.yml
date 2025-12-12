@@ -1,0 +1,93 @@
+# Main site playbook
+# Orchestrates all roles for complete environment setup
+
+---
+- name: Apply common configuration to all servers
+  hosts: servers
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Display target information
+      ansible.builtin.debug:
+        msg: "Configuring {{ inventory_hostname }} ({{ ansible_distribution }} {{ ansible_distribution_version }})"
+      tags: [always]
+
+    - name: Wait for system to be reachable
+      ansible.builtin.wait_for_connection:
+        timeout: 300
+      tags: [always]
+
+  roles:
+    - role: common
+      tags: [common]
+
+- name: Configure web servers
+  hosts: webservers
+  become: true
+  gather_facts: true
+
+  roles:
+    - role: docker
+      tags: [docker]
+    - role: nginx
+      tags: [nginx]
+
+- name: Configure application servers
+  hosts: appservers
+  become: true
+  gather_facts: true
+
+  roles:
+    - role: docker
+      tags: [docker]
+
+  tasks:
+    - name: Deploy application container
+      community.docker.docker_container:
+        name: "{{ app_name }}"
+        image: "{{ app_image | default('nginx:alpine') }}"
+        state: started
+        restart_policy: unless-stopped
+        ports:
+          - "{{ app_port }}:{{ app_port }}"
+        env:
+          ENVIRONMENT: "{{ environment }}"
+          PORT: "{{ app_port }}"
+        networks:
+          - name: ddgo-network
+        healthcheck:
+          test: ["CMD", "curl", "-f", "http://localhost:{{ app_port }}/health"]
+          interval: 30s
+          timeout: 10s
+          retries: 3
+          start_period: 40s
+      tags: [app, deploy]
+
+- name: Configure monitoring servers
+  hosts: monitoring
+  become: true
+  gather_facts: true
+
+  roles:
+    - role: docker
+      tags: [docker]
+    - role: monitoring
+      tags: [monitoring]
+
+- name: Post-deployment verification
+  hosts: servers
+  become: false
+  gather_facts: false
+
+  tasks:
+    - name: Verify services are running
+      ansible.builtin.uri:
+        url: "http://{{ ansible_host }}:{{ app_port | default(80) }}/health"
+        method: GET
+        status_code: 200
+      delegate_to: localhost
+      retries: 3
+      delay: 10
+      when: inventory_hostname in groups['appservers'] or inventory_hostname in groups['webservers']
+      tags: [verify]

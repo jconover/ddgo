@@ -1,0 +1,165 @@
+# Application deployment playbook
+# Zero-downtime deployment with health checks
+
+---
+- name: Deploy application
+  hosts: appservers
+  become: true
+  gather_facts: true
+  serial: 1  # Rolling deployment, one server at a time
+  max_fail_percentage: 0
+
+  vars:
+    app_name: ddgo-api
+    app_port: 5000
+    health_check_path: /health
+    deploy_timeout: 300
+
+  pre_tasks:
+    - name: Verify deployment parameters
+      ansible.builtin.assert:
+        that:
+          - app_image is defined
+          - app_image | length > 0
+        fail_msg: "app_image variable must be defined"
+      tags: [always]
+
+    - name: Display deployment info
+      ansible.builtin.debug:
+        msg: |
+          Deploying to: {{ inventory_hostname }}
+          Image: {{ app_image }}
+          Environment: {{ environment }}
+      tags: [always]
+
+  tasks:
+    - name: Pull new image
+      community.docker.docker_image:
+        name: "{{ app_image }}"
+        source: pull
+        force_source: true
+      register: image_pull
+      tags: [deploy]
+
+    - name: Get current container info
+      community.docker.docker_container_info:
+        name: "{{ app_name }}"
+      register: current_container
+      tags: [deploy]
+
+    - name: Stop old container gracefully
+      community.docker.docker_container:
+        name: "{{ app_name }}"
+        state: stopped
+        stop_timeout: 30
+      when: current_container.exists
+      tags: [deploy]
+
+    - name: Remove old container
+      community.docker.docker_container:
+        name: "{{ app_name }}"
+        state: absent
+      when: current_container.exists
+      tags: [deploy]
+
+    - name: Start new container
+      community.docker.docker_container:
+        name: "{{ app_name }}"
+        image: "{{ app_image }}"
+        state: started
+        restart_policy: unless-stopped
+        ports:
+          - "{{ app_port }}:{{ app_port }}"
+        env:
+          ENVIRONMENT: "{{ environment }}"
+          PORT: "{{ app_port | string }}"
+          DB_HOST: "{{ db_host | default('') }}"
+          DB_PORT: "{{ db_port | default('5432') | string }}"
+          DB_NAME: "{{ db_name | default('ddgo') }}"
+          REDIS_HOST: "{{ redis_host | default('') }}"
+          REDIS_PORT: "{{ redis_port | default('6379') | string }}"
+        networks:
+          - name: ddgo-network
+        healthcheck:
+          test: ["CMD", "curl", "-f", "http://localhost:{{ app_port }}{{ health_check_path }}"]
+          interval: 10s
+          timeout: 5s
+          retries: 5
+          start_period: 30s
+        labels:
+          app: "{{ app_name }}"
+          version: "{{ app_version | default('latest') }}"
+          deployed_at: "{{ ansible_date_time.iso8601 }}"
+      register: new_container
+      tags: [deploy]
+
+    - name: Wait for container to be healthy
+      community.docker.docker_container_info:
+        name: "{{ app_name }}"
+      register: container_health
+      until: container_health.container.State.Health.Status == "healthy"
+      retries: 30
+      delay: 10
+      tags: [deploy]
+
+    - name: Verify application health via HTTP
+      ansible.builtin.uri:
+        url: "http://localhost:{{ app_port }}{{ health_check_path }}"
+        method: GET
+        status_code: 200
+      register: health_check
+      retries: 5
+      delay: 5
+      tags: [deploy, verify]
+
+  post_tasks:
+    - name: Display deployment result
+      ansible.builtin.debug:
+        msg: |
+          Deployment successful!
+          Container ID: {{ new_container.container.Id[:12] }}
+          Health Status: {{ container_health.container.State.Health.Status }}
+      tags: [always]
+
+    - name: Clean up old images
+      community.docker.docker_prune:
+        images: true
+        images_filters:
+          dangling: true
+      tags: [deploy, cleanup]
+
+  handlers:
+    - name: Rollback deployment
+      community.docker.docker_container:
+        name: "{{ app_name }}"
+        image: "{{ previous_image }}"
+        state: started
+        restart_policy: unless-stopped
+        ports:
+          - "{{ app_port }}:{{ app_port }}"
+      when: previous_image is defined
+
+---
+- name: Post-deployment verification
+  hosts: webservers[0]
+  become: false
+  gather_facts: false
+
+  tasks:
+    - name: Verify all app servers are healthy
+      ansible.builtin.uri:
+        url: "http://{{ hostvars[item].ansible_host }}:{{ app_port | default(5000) }}/health"
+        method: GET
+        status_code: 200
+      loop: "{{ groups['appservers'] }}"
+      delegate_to: localhost
+      tags: [verify]
+
+    - name: Run smoke tests
+      ansible.builtin.uri:
+        url: "http://{{ hostvars[item].ansible_host }}:{{ app_port | default(5000) }}/api/v1/info"
+        method: GET
+        status_code: 200
+      loop: "{{ groups['appservers'] }}"
+      delegate_to: localhost
+      tags: [verify, smoke]
