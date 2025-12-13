@@ -1,0 +1,157 @@
+# Alertmanager Configuration
+# Routes alerts to appropriate receivers
+
+global:
+  # SMTP settings for email notifications
+  smtp_smarthost: 'smtp.example.com:587'
+  smtp_from: 'alertmanager@ddgo.example.com'
+  smtp_auth_username: 'alertmanager'
+  smtp_auth_password: '${SMTP_PASSWORD}'
+  smtp_require_tls: true
+
+  # Slack settings
+  slack_api_url: '${SLACK_WEBHOOK_URL}'
+
+  # PagerDuty settings
+  pagerduty_url: 'https://events.pagerduty.com/v2/enqueue'
+
+  # Default resolve timeout
+  resolve_timeout: 5m
+
+# Alert routing
+route:
+  # Default receiver
+  receiver: 'default-receiver'
+
+  # Group alerts by these labels
+  group_by: ['alertname', 'severity', 'environment']
+
+  # Wait before sending first notification
+  group_wait: 30s
+
+  # Interval between notifications for same group
+  group_interval: 5m
+
+  # Interval for repeated notifications
+  repeat_interval: 4h
+
+  # Child routes
+  routes:
+    # Critical alerts go to PagerDuty and Slack
+    - match:
+        severity: critical
+      receiver: 'critical-receiver'
+      group_wait: 10s
+      repeat_interval: 1h
+      continue: true
+
+    # Warning alerts go to Slack only
+    - match:
+        severity: warning
+      receiver: 'warning-receiver'
+      group_wait: 1m
+      repeat_interval: 4h
+
+    # Database alerts
+    - match_re:
+        alertname: ^(PostgreSQL|Redis).*
+      receiver: 'database-receiver'
+      group_by: ['alertname', 'instance']
+
+    # Infrastructure alerts
+    - match_re:
+        alertname: ^(High|Low|Disk).*
+      receiver: 'infrastructure-receiver'
+
+# Inhibition rules - suppress less severe alerts when more severe exist
+inhibit_rules:
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['alertname', 'instance']
+
+  - source_match:
+      alertname: 'ApplicationDown'
+    target_match_re:
+      alertname: '.+'
+    equal: ['instance']
+
+# Receivers
+receivers:
+  # Default receiver - Slack channel
+  - name: 'default-receiver'
+    slack_configs:
+      - channel: '#ddgo-alerts'
+        username: 'AlertManager'
+        icon_emoji: ':warning:'
+        send_resolved: true
+        title: '{{ template "slack.default.title" . }}'
+        text: '{{ template "slack.default.text" . }}'
+
+  # Critical alerts - PagerDuty + Slack
+  - name: 'critical-receiver'
+    pagerduty_configs:
+      - routing_key: '${PAGERDUTY_ROUTING_KEY}'
+        severity: critical
+        description: '{{ .CommonAnnotations.summary }}'
+        details:
+          firing: '{{ template "pagerduty.default.instances" .Alerts.Firing }}'
+          num_firing: '{{ .Alerts.Firing | len }}'
+          environment: '{{ .CommonLabels.environment }}'
+    slack_configs:
+      - channel: '#ddgo-critical'
+        username: 'AlertManager'
+        icon_emoji: ':fire:'
+        send_resolved: true
+        color: '{{ if eq .Status "firing" }}danger{{ else }}good{{ end }}'
+        title: ':rotating_light: CRITICAL: {{ .CommonAnnotations.summary }}'
+        text: |
+          *Alert:* {{ .CommonAnnotations.summary }}
+          *Description:* {{ .CommonAnnotations.description }}
+          *Severity:* {{ .CommonLabels.severity }}
+          *Environment:* {{ .CommonLabels.environment }}
+
+  # Warning alerts - Slack only
+  - name: 'warning-receiver'
+    slack_configs:
+      - channel: '#ddgo-alerts'
+        username: 'AlertManager'
+        icon_emoji: ':warning:'
+        send_resolved: true
+        color: '{{ if eq .Status "firing" }}warning{{ else }}good{{ end }}'
+        title: ':warning: {{ .CommonAnnotations.summary }}'
+        text: |
+          *Alert:* {{ .CommonAnnotations.summary }}
+          *Description:* {{ .CommonAnnotations.description }}
+          *Severity:* {{ .CommonLabels.severity }}
+
+  # Database alerts
+  - name: 'database-receiver'
+    slack_configs:
+      - channel: '#ddgo-database'
+        username: 'AlertManager'
+        icon_emoji: ':database:'
+        send_resolved: true
+        title: ':floppy_disk: Database Alert: {{ .CommonAnnotations.summary }}'
+        text: |
+          *Alert:* {{ .CommonAnnotations.summary }}
+          *Instance:* {{ .CommonLabels.instance }}
+          *Description:* {{ .CommonAnnotations.description }}
+
+  # Infrastructure alerts
+  - name: 'infrastructure-receiver'
+    slack_configs:
+      - channel: '#ddgo-infrastructure'
+        username: 'AlertManager'
+        icon_emoji: ':computer:'
+        send_resolved: true
+        title: ':gear: Infrastructure Alert: {{ .CommonAnnotations.summary }}'
+        text: |
+          *Alert:* {{ .CommonAnnotations.summary }}
+          *Instance:* {{ .CommonLabels.instance }}
+          *Description:* {{ .CommonAnnotations.description }}
+
+# Custom templates
+templates:
+  - '/etc/alertmanager/templates/*.tmpl'
